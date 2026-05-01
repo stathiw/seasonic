@@ -1,0 +1,14 @@
+services:
+  seasonic:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - DISPLAY=${DISPLAY}
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
+      - XDG_RUNTIME_DIR=/tmp/runtime
+      - QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-wayland}
+      - HOME=${HOME}
+    volumes:
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/${WAYLAND_DISPLAY:-wayland-0}:/tmp/runtime/${WAYLAND_DISPLAY:-wayland-0}
+      - ${HOME}:${HOME}:ro
