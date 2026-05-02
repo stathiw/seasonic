@@ -48,6 +48,9 @@ class MainWindow(QMainWindow):
         self.current_frame = 0
         self.playing = False
         self.playback_fps = 10
+        self.fan_mode = False
+        self._fan_map = None
+        self._fan_map_key = None
 
         self.setWindowTitle("Seasonic")
 
@@ -56,43 +59,54 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(central)
         layout.setContentsMargins(4, 4, 4, 4)
 
-        self.sonar_widget = SonarWidget()
-        layout.addWidget(self.sonar_widget, stretch=1)
-
-        controls = QHBoxLayout()
-        controls.setSpacing(8)
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
 
         self.btn_open = QPushButton("Open")
         self.btn_open.setFixedWidth(60)
         self.btn_open.clicked.connect(self.open_file)
-        controls.addWidget(self.btn_open)
+        toolbar.addWidget(self.btn_open)
+
+        self.btn_view = QPushButton("Fan")
+        self.btn_view.setFixedWidth(50)
+        self.btn_view.clicked.connect(self.toggle_view)
+        toolbar.addWidget(self.btn_view)
+
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        self.sonar_widget = SonarWidget()
+        layout.addWidget(self.sonar_widget, stretch=1)
+
+        playback = QHBoxLayout()
+        playback.setSpacing(8)
 
         self.btn_prev = QPushButton("◀")
         self.btn_prev.setFixedWidth(40)
         self.btn_prev.clicked.connect(self.step_back)
-        controls.addWidget(self.btn_prev)
+        playback.addWidget(self.btn_prev)
 
         self.btn_play = QPushButton("Play")
         self.btn_play.setFixedWidth(60)
         self.btn_play.clicked.connect(self.toggle_play)
-        controls.addWidget(self.btn_play)
+        playback.addWidget(self.btn_play)
 
         self.btn_next = QPushButton("▶")
         self.btn_next.setFixedWidth(40)
         self.btn_next.clicked.connect(self.step_forward)
-        controls.addWidget(self.btn_next)
+        playback.addWidget(self.btn_next)
 
         self.slider = QSlider(Qt.Horizontal)
         self.slider.setMinimum(0)
         self.slider.setMaximum(0)
         self.slider.valueChanged.connect(self.slider_changed)
-        controls.addWidget(self.slider, stretch=1)
+        playback.addWidget(self.slider, stretch=1)
 
         self.frame_label = QLabel("No file loaded")
         self.frame_label.setFixedWidth(160)
-        controls.addWidget(self.frame_label)
+        playback.addWidget(self.frame_label)
 
-        layout.addLayout(controls)
+        layout.addLayout(playback)
 
         self.play_timer = QTimer()
         self.play_timer.timeout.connect(self.step_forward)
@@ -157,7 +171,11 @@ class MainWindow(QMainWindow):
             self.frame_label.setText(f"Frame {index + 1}/{self.s7k.frame_count}")
         else:
             gray = self._normalize(frame.data)
-            self.sonar_widget.set_image(gray.T)
+            if self.fan_mode:
+                display = self._apply_fan_projection(gray, self.s7k.swath_angle)
+            else:
+                display = gray.T
+            self.sonar_widget.set_image(display)
             self.frame_label.setText(
                 f"Frame {index + 1}/{self.s7k.frame_count}"
                 f"  Ping {frame.ping_number}")
@@ -185,6 +203,53 @@ class MainWindow(QMainWindow):
 
     def slider_changed(self, value):
         self.show_frame(value)
+
+    def toggle_view(self):
+        self.fan_mode = not self.fan_mode
+        self.btn_view.setText("Rect" if self.fan_mode else "Fan")
+        self._fan_map = None
+        self._fan_map_key = None
+        if self.s7k:
+            self.show_frame(self.current_frame)
+
+    def _build_fan_map(self, n_beams, n_samples, swath):
+        half = swath / 2.0
+        sin_half = np.sin(half)
+        cos_half = np.cos(half)
+
+        y_min = min(0.0, n_samples * cos_half)
+        out_h = int(np.ceil(n_samples - y_min)) + 2
+        out_w = int(np.ceil(2 * n_samples * sin_half)) + 2
+
+        cx = out_w / 2.0
+        cy = -y_min + 1.0
+
+        ys, xs = np.mgrid[0:out_h, 0:out_w]
+        dx = xs - cx
+        dy = ys - cy
+        r = np.sqrt(dx * dx + dy * dy)
+        theta = np.arctan2(dx, dy)
+
+        r_idx = r.astype(np.int32)
+        beam_idx = ((theta + half) / swath * (n_beams - 1)).astype(np.int32)
+
+        valid = ((r_idx >= 0) & (r_idx < n_samples) &
+                 (beam_idx >= 0) & (beam_idx < n_beams) &
+                 (np.abs(theta) <= half))
+
+        self._fan_map = (out_h, out_w, beam_idx, r_idx, valid)
+        self._fan_map_key = (n_beams, n_samples, swath)
+
+    def _apply_fan_projection(self, gray, swath_angle):
+        n_beams, n_samples = gray.shape
+        swath = swath_angle if swath_angle else 2.0
+        key = (n_beams, n_samples, swath)
+        if self._fan_map is None or self._fan_map_key != key:
+            self._build_fan_map(n_beams, n_samples, swath)
+        out_h, out_w, beam_idx, r_idx, valid = self._fan_map
+        out = np.zeros((out_h, out_w), dtype=np.uint8)
+        out[valid] = gray[beam_idx[valid], r_idx[valid]]
+        return out
 
     def toggle_play(self):
         if not self.s7k:
