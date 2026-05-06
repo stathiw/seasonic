@@ -12,3 +12,4 @@ services:
     volumes:
       - ${XDG_RUNTIME_DIR:-/run/user/1000}/${WAYLAND_DISPLAY:-wayland-0}:/tmp/runtime/${WAYLAND_DISPLAY:-wayland-0}
       - ${HOME}:${HOME}:ro
+      - ${HOME}/Pictures:${HOME}/Pictures:rw
