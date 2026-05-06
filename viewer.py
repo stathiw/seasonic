@@ -3,7 +3,7 @@ import os
 import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QSlider, QLabel, QSizePolicy, QFileDialog,
+    QPushButton, QSlider, QLabel, QSizePolicy, QFileDialog, QMessageBox,
 )
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap, QPainter, QKeySequence, QShortcut
@@ -72,6 +72,11 @@ class MainWindow(QMainWindow):
         self.btn_view.clicked.connect(self.toggle_view)
         toolbar.addWidget(self.btn_view)
 
+        self.btn_screenshot = QPushButton("Screenshot")
+        self.btn_screenshot.setFixedWidth(90)
+        self.btn_screenshot.clicked.connect(self.save_screenshot)
+        toolbar.addWidget(self.btn_screenshot)
+
         toolbar.addStretch()
         layout.addLayout(toolbar)
 
@@ -118,6 +123,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence(Qt.Key_End), self, lambda: self.go_to_frame(
             self.s7k.frame_count - 1 if self.s7k else 0))
         QShortcut(QKeySequence("Ctrl+O"), self, self.open_file)
+        QShortcut(QKeySequence("Ctrl+S"), self, self.save_screenshot)
 
         self.resize(1200, 800)
 
@@ -250,6 +256,22 @@ class MainWindow(QMainWindow):
         out = np.zeros((out_h, out_w), dtype=np.uint8)
         out[valid] = gray[beam_idx[valid], r_idx[valid]]
         return out
+
+    def save_screenshot(self):
+        if self.sonar_widget._pixmap is None:
+            return
+        scaled = self.sonar_widget._pixmap.scaled(
+            self.sonar_widget.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Screenshot", os.path.expanduser("~/Pictures/screenshot.png"),
+            "PNG (*.png);;JPEG (*.jpg);;All Files (*)",
+        )
+        if path:
+            img = scaled.toImage().convertToFormat(QImage.Format_RGB32)
+            ext = os.path.splitext(path)[1].lower()
+            fmt = "JPEG" if ext in (".jpg", ".jpeg") else "PNG"
+            if not img.save(path, fmt):
+                QMessageBox.warning(self, "Screenshot", f"Failed to save: {path}")
 
     def toggle_play(self):
         if not self.s7k:
