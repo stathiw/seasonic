@@ -8,6 +8,9 @@ S7K sonar file viewer for Norbit WBMS water column data. Plays back record 7042 
 
 - Rectangular and fan projection views
 - Playback with play/pause, frame stepping, and scrubbing
+- Colour schemes: Grayscale, viridis, cividis, copper, ocean
+- Range and swath scale overlay
+- Screenshot export (Ctrl+S)
 - Keyboard shortcuts: Space (play/pause), Left/Right (step), Home/End, Ctrl+O (open)
 - Log-scaled intensity normalisation
 
