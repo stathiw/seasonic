@@ -4,6 +4,7 @@ import numpy as np
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QSlider, QLabel, QSizePolicy, QFileDialog, QMessageBox,
+    QComboBox,
 )
 from PySide6.QtCore import Qt, QTimer, QRectF, QPointF
 from PySide6.QtGui import QImage, QPixmap, QPainter, QKeySequence, QShortcut, QPen, QColor, QFont
@@ -11,6 +12,17 @@ from PySide6.QtGui import QImage, QPixmap, QPainter, QKeySequence, QShortcut, QP
 from s7k_parser import S7KFile
 
 SPEED_OF_SOUND = 1500.0
+
+COLORMAP_NAMES = ['Grayscale', 'viridis', 'cividis', 'copper', 'ocean']
+
+def _build_lut(name):
+    from matplotlib import colormaps
+    cmap = colormaps[name]
+    lut = (cmap(np.linspace(0, 1, 256))[:, :3] * 255).astype(np.uint8)
+    lut[0] = 0
+    return lut
+
+COLORMAPS = {name: _build_lut(name) for name in COLORMAP_NAMES if name != 'Grayscale'}
 
 
 class SonarWidget(QWidget):
@@ -21,16 +33,20 @@ class SonarWidget(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.setMinimumSize(400, 300)
 
-    def set_image(self, gray_2d, scale_info=None):
+    def set_image(self, data, scale_info=None):
         self._scale_info = scale_info
-        if gray_2d is None:
+        if data is None:
             self._pixmap = None
             self.update()
             return
 
-        display = np.ascontiguousarray(gray_2d)
-        h, w = display.shape
-        qimg = QImage(display.data, w, h, w, QImage.Format_Grayscale8)
+        display = np.ascontiguousarray(data)
+        if display.ndim == 3:
+            h, w, _ = display.shape
+            qimg = QImage(display.data, w, h, w * 3, QImage.Format_RGB888)
+        else:
+            h, w = display.shape
+            qimg = QImage(display.data, w, h, w, QImage.Format_Grayscale8)
         self._pixmap = QPixmap.fromImage(qimg)
         self.update()
 
@@ -225,6 +241,7 @@ class MainWindow(QMainWindow):
         self.playing = False
         self.playback_fps = 10
         self.fan_mode = False
+        self._colormap_name = 'Grayscale'
         self._fan_map = None
         self._fan_map_key = None
 
@@ -252,6 +269,12 @@ class MainWindow(QMainWindow):
         self.btn_screenshot.setFixedWidth(90)
         self.btn_screenshot.clicked.connect(self.save_screenshot)
         toolbar.addWidget(self.btn_screenshot)
+
+        self.cmap_combo = QComboBox()
+        self.cmap_combo.addItems(COLORMAP_NAMES)
+        self.cmap_combo.setFixedWidth(100)
+        self.cmap_combo.currentTextChanged.connect(self.change_colormap)
+        toolbar.addWidget(self.cmap_combo)
 
         toolbar.addStretch()
         layout.addLayout(toolbar)
@@ -357,6 +380,7 @@ class MainWindow(QMainWindow):
                 display = self._apply_fan_projection(gray, self.s7k.swath_angle)
             else:
                 display = gray.T
+            display = self._apply_colormap(display)
             self.sonar_widget.set_image(display, self._build_scale_info(frame))
             self.frame_label.setText(
                 f"Frame {index + 1}/{self.s7k.frame_count}"
@@ -387,6 +411,17 @@ class MainWindow(QMainWindow):
             'max_range_m': max_range_m,
             'swath_rad': swath,
         }
+
+    def _apply_colormap(self, gray):
+        lut = COLORMAPS.get(self._colormap_name)
+        if lut is None:
+            return gray
+        return lut[gray]
+
+    def change_colormap(self, name):
+        self._colormap_name = name
+        if self.s7k:
+            self.show_frame(self.current_frame)
 
     def step_forward(self):
         if not self.s7k:
